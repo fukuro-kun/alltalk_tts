@@ -4798,12 +4798,17 @@ if __name__ == "__main__":
                 basemodel_or_finetunedmodel_choice,
                 model_to_train,
                 None)
+        # Import the new stimmen module
+        from stimmen import setup_stimmen_tab
+
+        # Füge den Stimmen-Tab zur Demo hinzu
+        setup_stimmen_tab(demo)
 
     demo.queue().launch(
         show_api=False,
         inbrowser=True,
         share=False,
-        debug=False,
+        debug=True,  # Aktiviert Debugging und Auto-Reload
         server_port=7052,
         server_name="127.0.0.1",
     )
