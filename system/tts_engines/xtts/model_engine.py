@@ -1169,15 +1169,43 @@ class tts_class:
     # Helper Functions that are specific to this script & not generically needed #
     ##############################################################################
     def _generate_conditioning_latents(self, audio_paths):
-        """Generate conditioning latents from audio files."""
+        """Generate conditioning latents from audio files and save to JSON."""
         self.debug_func_entry()
         self.print_message(f"Generating latents from {len(audio_paths)} audio files", message_type="debug_tts")
-        return self.model.get_conditioning_latents(
+        
+        # Generiere Latents
+        gpt_cond_latent, speaker_embedding = self.model.get_conditioning_latents(
             audio_path=audio_paths,
             gpt_cond_len=self.model.config.gpt_cond_len,
             max_ref_length=self.model.config.max_ref_len,
             sound_norm_refs=self.model.config.sound_norm_refs,
         )
+        
+        # Speichere Latents als JSON
+        try:
+            # Extrahiere den Stimmnamen aus dem ersten Audiodateipfad
+            voice_name = os.path.splitext(os.path.basename(audio_paths[0]))[0]
+            
+            # Erstelle den Pfad für die Latent-Datei
+            latent_path = os.path.join(self.main_dir, "voices", "xtts_latents", f"{voice_name}.json")
+            
+            # Stelle sicher, dass das Verzeichnis existiert
+            os.makedirs(os.path.dirname(latent_path), exist_ok=True)
+            
+            # Speichere Latents als JSON
+            latent_data = {
+                'gpt_cond_latent': gpt_cond_latent.tolist(),
+                'speaker_embedding': speaker_embedding.tolist()
+            }
+            
+            with open(latent_path, 'w') as f:
+                json.dump(latent_data, f, indent=2)
+            
+            self.print_message(f"Latent für Stimme {voice_name} gespeichert.", message_type="debug_tts")
+        except Exception as e:
+            self.print_message(f"Fehler beim Speichern der Latent-Datei: {e}", message_type="warning")
+        
+        return gpt_cond_latent, speaker_embedding
 
     def _load_latents(self, voice):
         """Load speaker latents from JSON file."""
