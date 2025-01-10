@@ -563,9 +563,20 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 merged_audio = gr.Audio(label="Merged Latent Audio")
         
         # Slider-Synchronisation
-        def sync_sliders(slider1, slider2):
-            """Synchronisiere Slider, sodass sie immer 100% ergeben"""
-            return gr.Slider(value=100 - slider1)
+        def sync_sliders(slider1: float, slider2: float | None = None) -> gr.Slider:
+            """
+            Synchronisiere Slider, sodass sie immer 100% ergeben.
+
+            Args:
+                slider1 (float): Wert des ersten Sliders.
+                slider2 (float, optional): Wert des zweiten Sliders. Defaults to None.
+
+            Returns:
+                gr.Slider: Gradio-Slider mit synchronisiertem Wert.
+            """
+            if slider2 is None:
+                slider2 = 0
+            return gr.Slider(value=100 - slider1 - slider2)
         
         # Slider-Synchronisations-Event-Handler
         gpt_latent1_slider.change(
