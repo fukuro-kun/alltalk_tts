@@ -33,6 +33,15 @@ class TestLatentAudioGeneration(unittest.TestCase):
     liefert detaillierte Debugging-Informationen.
     """
 
+    tts_engine = None  # Klassenattribut für TTS-Engine
+
+    @classmethod
+    def setUpClass(cls):
+        # Stelle sicher, dass die TTS-Engine vor den Tests initialisiert wird
+        from system.tts_engines.xtts.model_engine import tts_class as XTTSEngine
+        cls.tts_engine = XTTSEngine()
+        asyncio.run(cls.tts_engine.setup())
+
     def setUp(self):
         """
         Initialisiert Testumgebung und definiert Latent-Dateien.
@@ -230,6 +239,9 @@ def test_generate_latent_audio():
     """
     Testet die Audio-Generierung aus Latent-Dateien mit umfangreichem Logging.
     """
+    # Nutze die Klasseninstanz der TTS-Engine
+    tts_engine = TestLatentAudioGeneration.tts_engine
+
     # Konfiguriere Logging mit Stream-Handler
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -262,6 +274,9 @@ def test_generate_latent_audio_with_custom_text():
     """
     Testet die Audio-Generierung mit benutzerdefiniertem Text.
     """
+    # Nutze die Klasseninstanz der TTS-Engine
+    tts_engine = TestLatentAudioGeneration.tts_engine
+
     # Konfiguriere Logging mit Stream-Handler
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s - %(levelname)s - %(message)s',

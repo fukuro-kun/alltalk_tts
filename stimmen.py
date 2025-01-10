@@ -466,7 +466,7 @@ def generate_latent_audio(
         
         # Standardtext für deutsche Generierung
         if text is None:
-            text = "Der alte Meister saß in seinem Studierzimmer und betrachtete die alten Schriftrollen."
+            text = "Der alte Meister saß in seinem Studierzimmer und betrachtete die alten Schriftrollen. Die Zeit schien stillzustehen, während er die vergilbten Seiten durchblätterte! Draußen tobte ein Sturm, aber hier drinnen war es warm und gemütlich."
         
         # Temporäres Verzeichnis für Vorschau-Audios
         if output_dir is None:
@@ -519,10 +519,16 @@ def generate_latent_audio(
             try:
                 # Verwende asyncio.run für asynchrone Methode
                 import asyncio
-                asyncio.run(tts_engine.handle_tts_method_change(f"{model_name} - xttsv2_{version}"))
+                
+                # Debugging: Überprüfe den Modell-Methoden-String
+                model_method = f"{model_name} - xttsv2_{version}"
+                print(f"🔍 Zu ladender Modell-Methoden-String: '{model_method}'")
+                
+                asyncio.run(tts_engine.handle_tts_method_change(model_method))
                 print("✅ Modell erfolgreich geladen")
             except Exception as load_error:
                 print(f"❌ Fehler beim Laden des Modells: {load_error}")
+                print(traceback.format_exc())
                 return None
         
         # Überprüfe, ob ein Modell geladen ist
