@@ -71,6 +71,16 @@ Hauptfunktionen Funktionen in Reihenfolge:
     - Integriert Latent-Management-Funktionen
     - Implementiert Slider-Synchronisation
     - Handhabt Modell-Laden und Audio-Generierung
+
+12. initialize_xtts_model():
+    - Initialisiert das XTTS-Modell für Latent-Generierung
+    - Lädt das Modell aus Konfigurations- und Checkpoint-Dateien
+    - Verwendet die Vokabulardatei für Tokenisierung
+    - Verwendet DeepSpeed für Acceleration, falls verfügbar
+    - Fügt ein Speaker Embedding Layer hinzu, falls vorhanden
+    - Verwendet den GPU-Bereich, wenn verfügbar
+    - Gibt das initialisierte Modell zurück
+
 """
 
 import os
@@ -87,6 +97,7 @@ import traceback
 import torch
 from TTS.tts.models.xtts import Xtts
 from TTS.tts.configs.xtts_config import XttsConfig
+import torchaudio
 
 def get_latent_directory(base_dir: str | None = None) -> str:
     """
@@ -437,7 +448,7 @@ def generate_latent_audio(
     output_dir: str | None = None,
     model_name: str = "xtts",
     version: str = "2.0.3"
-) -> str | None:
+) -> str:
     """
     Generiert Audio aus einem beliebigen Latent.
 
@@ -451,132 +462,43 @@ def generate_latent_audio(
         version (str, optional): Version des Modells. Defaults to "2.0.3".
 
     Returns:
-        str | None: Pfad zur generierten Audiodatei oder None bei Fehler.
-
-    Raises:
-        ImportError: Wenn TTS-Engine nicht geladen werden kann.
-        RuntimeError: Bei Problemen während der Audio-Generierung.
+        str: Pfad zur generierten Audiodatei.
     """
-    # Verwende print() für direkte Ausgabe in pytest
-    print(f"🔍 Starte Audio-Generierung für Latent: {latent_name}")
+    # Statische Modell-Initialisierung mit bestehender Funktion
+    if not hasattr(generate_latent_audio, 'model'):
+        generate_latent_audio.model = initialize_xtts_model()
     
-    try:
-        # Importiere die TTS-Engine
-        from system.tts_engines.xtts.model_engine import tts_class
-        
-        # Standardtext für deutsche Generierung
-        if text is None:
-            text = "Der alte Meister saß in seinem Studierzimmer und betrachtete die alten Schriftrollen. Die Zeit schien stillzustehen, während er die vergilbten Seiten durchblätterte! Draußen tobte ein Sturm, aber hier drinnen war es warm und gemütlich."
-        
-        # Temporäres Verzeichnis für Vorschau-Audios
-        if output_dir is None:
-            output_dir = tempfile.mkdtemp(prefix='alltalk_preview_')
-        
-        # Überprüfe Latent-Datei
-        latent_dir = get_latent_directory()
-        latent_path = os.path.join(latent_dir, f"{latent_name}.json")
-        
-        print(f"🔍 Latent-Verzeichnis: {latent_dir}")
-        print(f"🔍 Latent-Pfad: {latent_path}")
-        print(f"🔍 Existiert Latent-Datei: {os.path.exists(latent_path)}")
-        
-        if not os.path.exists(latent_path):
-            print(f"❌ Latent-Datei nicht gefunden: {latent_path}")
-            return None
-        
-        # Validiere Latent-JSON
-        try:
-            with open(latent_path, 'r', encoding='utf-8') as f:
-                latent_data = json.load(f)
-                
-            # Zusätzliche Validierungen
-            if not isinstance(latent_data, dict):
-                print(f"❌ Ungültiges Latent-Format: {latent_path}")
-                return None
-        except json.JSONDecodeError as je:
-            print(f"❌ JSON-Dekodierungsfehler in {latent_path}: {je}")
-            return None
-        except Exception as e:
-            print(f"❌ Fehler beim Laden des Latents: {e}")
-            return None
-        
-        # Generiere Ausgabedateinamen im temporären Verzeichnis
-        output_path = os.path.join(output_dir, f"{latent_name}_preview.wav")
-        
-        # Zusätzliche Debugging-Informationen
-        print(f"📂 Ausgabepfad: {output_path}")
-        print(f"📄 Latent-Pfad: {latent_path}")
-        print(f"🔤 Text: {text}")
-        
-        # Initialisiere TTS-Engine
-        print("🚀 Initialisiere TTS-Engine")
-        tts_engine = tts_class()
-        print("✅ TTS-Engine initialisiert")
-        
-        # Versuche, das Modell zu laden, wenn es nicht geladen ist
-        if not tts_engine.is_tts_model_loaded:
-            print("🔄 Lade Modell vor Audio-Generierung")
-            try:
-                # Verwende asyncio.run für asynchrone Methode
-                import asyncio
-                
-                # Debugging: Überprüfe den Modell-Methoden-String
-                model_method = f"{model_name} - xttsv2_{version}"
-                print(f"🔍 Zu ladender Modell-Methoden-String: '{model_method}'")
-                
-                asyncio.run(tts_engine.handle_tts_method_change(model_method))
-                print("✅ Modell erfolgreich geladen")
-            except Exception as load_error:
-                print(f"❌ Fehler beim Laden des Modells: {load_error}")
-                print(traceback.format_exc())
-                return None
-        
-        # Überprüfe, ob ein Modell geladen ist
-        print(f"🔍 Aktuell geladenes Modell: {tts_engine.current_model_loaded}")
-        print(f"🔍 Modell geladen: {tts_engine.is_tts_model_loaded}")
-        
-        # Audio generieren - WICHTIG: Prefix 'latent:' beibehalten!
-        try:
-            print("🎤 Starte Audio-Generierung")
-            result = tts_engine.generate_tts(
-                text=text,
-                voice=f"latent:{latent_name}.json",  # Wichtig: Prefix 'latent:' bleibt!
-                language="de",
-                temperature=0.7,
-                repetition_penalty=5.0,
-                speed=1.0,
-                pitch=0.0,
-                output_file=output_path,
-                streaming=False
-            )
-            
-            print(f"🎵 TTS-Generierung Ergebnis: {result}")
-        except Exception as tts_error:
-            print(f"❌ Fehler bei TTS-Generierung: {tts_error}")
-            print(traceback.format_exc())
-            return None
-        
-        # Überprüfe, ob Audio generiert wurde
-        print(f"📊 Überprüfe Ausgabedatei: {output_path}")
-        print(f"📊 Datei existiert: {os.path.exists(output_path)}")
-        print(f"📊 Dateigröße: {os.path.getsize(output_path) if os.path.exists(output_path) else 'N/A'}")
-        
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            print(f"❌ Keine Audio-Datei generiert: {output_path}")
-            print(traceback.format_exc())
-            return None
-        
-        print(f"✅ Audio-Vorschau erfolgreich generiert: {output_path}")
-        return output_path
+    # Standard-Text für Vorschau
+    default_text = "Dies ist eine Latent Audio Vorschau."
     
-    except ImportError as ie:
-        print(f"❌ Import-Fehler: TTS-Engine konnte nicht geladen werden: {ie}")
-        print(traceback.format_exc())
-        return None
-    except Exception as e:
-        print(f"❌ Unerwarteter Fehler bei Audio-Generierung aus Latent: {e}")
-        print(traceback.format_exc())
-        return None
+    # Latent-Datei laden
+    latent_path = os.path.join(get_latent_directory(), f"{latent_name}.json")
+    with open(latent_path, 'r') as f:
+        latent_data = json.load(f)
+    
+    # Tensor-Generierung
+    gpt_cond_latent = torch.tensor(latent_data['gpt_cond_latent'])
+    speaker_embedding = torch.tensor(latent_data['speaker_embedding'])
+    
+    # Audio-Generierung
+    out = generate_latent_audio.model.inference(
+        text=text or default_text,
+        language="de",
+        gpt_cond_latent=gpt_cond_latent,
+        speaker_embedding=speaker_embedding,
+        temperature=0.7,
+        length_penalty=1.0,
+        repetition_penalty=2.0
+    )
+    
+    # Audio speichern
+    output_dir = output_dir or tempfile.mkdtemp()
+    output_path = os.path.join(output_dir, f"{latent_name}_preview.wav")
+    
+    out_wav = torch.tensor(out["wav"]).unsqueeze(0)
+    torchaudio.save(output_path, out_wav, 24000)
+    
+    return output_path
 
 def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
     """
@@ -607,7 +529,24 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
     latent_dir = get_latent_directory()
     os.makedirs(latent_dir, exist_ok=True)
     
+    # 1. ZUERST: Dropdowns schnell befüllen
+    available_latents = load_available_latents()
+    
+    # 2. Modell-Initialisierung im Hintergrund starten
+    def background_model_init():
+        try:
+            demo.xtts_model = initialize_xtts_model()
+            return gr.update(value="✅ Modell erfolgreich geladen", visible=True)
+        except Exception as e:
+            return gr.update(value=f"❌ Modellfehler: {str(e)}", visible=True)
+    
     with gr.Tab("🎙️ Stimmen Management"):
+        # Modell-Status Label INNERHALB des Tabs
+        model_status = gr.Label(
+            value="🔄 Modell wird geladen...", 
+            visible=True
+        )
+
         with gr.Row():
             text_input = gr.Textbox(
                 label="Standard-Text für Generierungen", 
@@ -623,6 +562,7 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 with gr.Column(scale=3):
                     gpt_latent1_dropdown = gr.Dropdown(
                         label="GPT Latent 1", 
+                        choices=available_latents,
                         interactive=True
                     )
                     gpt_latent1_slider = gr.Slider(
@@ -638,6 +578,7 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 with gr.Column(scale=3):
                     gpt_latent2_dropdown = gr.Dropdown(
                         label="GPT Latent 2", 
+                        choices=available_latents,
                         interactive=True
                     )
                     gpt_latent2_slider = gr.Slider(
@@ -657,6 +598,7 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 with gr.Column(scale=3):
                     speaker_latent1_dropdown = gr.Dropdown(
                         label="Speaker Latent 1", 
+                        choices=available_latents,
                         interactive=True
                     )
                     speaker_latent1_slider = gr.Slider(
@@ -672,6 +614,7 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 with gr.Column(scale=3):
                     speaker_latent2_dropdown = gr.Dropdown(
                         label="Speaker Latent 2", 
+                        choices=available_latents,
                         interactive=True
                     )
                     speaker_latent2_slider = gr.Slider(
@@ -735,62 +678,6 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
             outputs=[speaker_latent1_slider, speaker_latent2_slider]
         )
         
-        # Modell-Laden und Dropdowns aktualisieren
-        def load_model_for_merge():
-            """Lädt das TTS-Modell für Latent Merge"""
-            try:
-                # Modellpfad dynamisch ermitteln
-                model_path = get_model_directory()
-                
-                # Modelldateien dynamisch laden
-                model_files = get_model_files(model_path)
-                
-                # Latent-Verzeichnisse erstellen
-                latent_dirs = [get_latent_directory()]
-                for directory in latent_dirs:
-                    os.makedirs(directory, exist_ok=True)
-                    print(f"📂 Verzeichnis erstellt: {directory}")
-                
-                # Konfiguration laden
-                config = XttsConfig()
-                config.load_json(model_files['config'])
-                
-                # Modell initialisieren
-                model = Xtts.init_from_config(config)
-                
-                # Modell laden
-                model.load_checkpoint(
-                    config,
-                    checkpoint_path=model_files['checkpoint'],
-                    vocab_path=model_files['vocab'],
-                    use_deepspeed=False,
-                    speaker_file_path=model_files['speakers']
-                )
-                
-                # Auf GPU verschieben, falls verfügbar
-                if torch.cuda.is_available():
-                    model.cuda()
-                
-                print("✅ Modell erfolgreich geladen!")
-                
-                # Zusätzliche Überprüfung der Latent-Dateien
-                latent_files = glob.glob(f"{latent_dirs[0]}/*")
-                print(f"📋 Gefundene Latent-Dateien: {latent_files}")
-                
-                return "✅ Modell erfolgreich geladen! Latent Merge ist jetzt verfügbar."
-            
-            except ImportError as e:
-                print(f"❌ Import-Fehler: {e}")
-                return f"Import-Fehler: Konnte Modell nicht laden - {e}"
-            
-            except Exception as e:
-                # Umfangreiches Debugging für unerwartete Fehler
-                import traceback
-                print(f"❌ Unerwarteter Fehler: {e}")
-                print("🔍 Traceback:")
-                traceback.print_exc()
-                return f"Fehler beim Laden des Modells: {str(e)}"
-
         # Dropdown-Aktualisierung mit Fehlerbehandlung
         def update_latent_dropdowns():
             """Aktualisiert die Latent-Dropdowns mit verfügbaren Latent-Dateien"""
@@ -840,19 +727,9 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
         progress_load = gr.Label(label="Progress:")
         
         load_btn.click(
-            fn=load_model_for_merge,
-            inputs=[],
-            outputs=[progress_load]
-        )
-        load_btn.click(
             fn=update_latent_dropdowns,
             inputs=[],
-            outputs=[
-                gpt_latent1_dropdown, 
-                gpt_latent2_dropdown, 
-                speaker_latent1_dropdown, 
-                speaker_latent2_dropdown
-            ]
+            outputs=[gpt_latent1_dropdown, gpt_latent2_dropdown, speaker_latent1_dropdown, speaker_latent2_dropdown]
         )
 
         # Generierungs-Handler für Latents
@@ -949,4 +826,36 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
             outputs=[merged_audio]
         )
     
+    # Hintergrund-Initialisierung starten
+    demo.load(
+        fn=background_model_init, 
+        inputs=None, 
+        outputs=[model_status]
+    )
+
     return demo
+
+def initialize_xtts_model():
+    """
+    Initialisiert das XTTS-Modell für Latent-Generierung.
+    
+    Returns:
+        Xtts: Initialisiertes und geladenes XTTS-Modell
+    """
+    config_path = "/media/fukuro/raid5/alltalk_tts/models/xtts/xttsv2_2.0.3/config.json"
+    checkpoint_path = "/media/fukuro/raid5/alltalk_tts/models/xtts/xttsv2_2.0.3/model.pth"
+    vocab_path = "/media/fukuro/raid5/alltalk_tts/models/xtts/xttsv2_2.0.3/vocab.json"
+    
+    config = XttsConfig()
+    config.load_json(config_path)
+    model = Xtts.init_from_config(config)
+    model.load_checkpoint(
+        config,
+        checkpoint_path=checkpoint_path,
+        vocab_path=vocab_path,
+        use_deepspeed=False
+    )
+    if torch.cuda.is_available():
+        model.cuda()
+    
+    return model
