@@ -92,6 +92,8 @@ import numpy as np
 import gradio as gr
 import glob
 import logging
+import time
+from functools import wraps
 
 def get_latent_directory(base_dir: str | None = None) -> str:
     """
@@ -563,53 +565,46 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 merged_audio = gr.Audio(label="Merged Latent Audio")
                 
         # Slider-Synchronisation       
-        # Globale Variable zur Vermeidung von Rekursion
-        _slider_update_in_progress = False
-
-        def sync_sliders(slider1: float) -> gr.Slider:
+        def update_sliders(slider1: float, slider2: float, changed: str) -> tuple[gr.Slider, gr.Slider]:
             """
-            Synchronisiert Slider, sodass sie immer 100% ergeben.
-
-            Diese Funktion verhindert Rekursion und stellt sicher, 
-            dass die Summe der Slider-Werte 100% beträgt.
+            Synchronisiert zwei Slider, sodass sie immer 100% ergeben.
 
             Args:
                 slider1 (float): Wert des ersten Sliders.
+                slider2 (float): Wert des zweiten Sliders.
+                changed (str): Identifier, welcher Slider geändert wurde.
 
             Returns:
-                gr.Slider: Gradio-Slider mit synchronisiertem Wert.
+                tuple[gr.Slider, gr.Slider]: Aktualisierte Slider.
             """
-            global _slider_update_in_progress
-            
-            if _slider_update_in_progress:
-                return gr.Slider(value=0)
-            
-            try:
-                _slider_update_in_progress = True
-                return gr.Slider(value=100 - slider1)
-            finally:
-                _slider_update_in_progress = False
+            total = slider1 + slider2
+            if total != 100:
+                if changed == "gpt_latent1":
+                    slider2 = 100 - slider1
+                else:
+                    slider1 = 100 - slider2
+            return gr.Slider(value=slider1), gr.Slider(value=slider2)
         
         # Slider-Synchronisations-Event-Handler
         gpt_latent1_slider.change(
-            fn=sync_sliders, 
-            inputs=gpt_latent1_slider, 
-            outputs=gpt_latent2_slider
+            fn=update_sliders, 
+            inputs=[gpt_latent1_slider, gpt_latent2_slider, gr.State("gpt_latent1")], 
+            outputs=[gpt_latent1_slider, gpt_latent2_slider]
         )
         gpt_latent2_slider.change(
-            fn=sync_sliders, 
-            inputs=gpt_latent2_slider, 
-            outputs=gpt_latent1_slider
+            fn=update_sliders, 
+            inputs=[gpt_latent1_slider, gpt_latent2_slider, gr.State("gpt_latent2")], 
+            outputs=[gpt_latent1_slider, gpt_latent2_slider]
         )
         speaker_latent1_slider.change(
-            fn=sync_sliders, 
-            inputs=speaker_latent1_slider, 
-            outputs=speaker_latent2_slider
+            fn=update_sliders, 
+            inputs=[speaker_latent1_slider, speaker_latent2_slider, gr.State("speaker_latent1")], 
+            outputs=[speaker_latent1_slider, speaker_latent2_slider]
         )
         speaker_latent2_slider.change(
-            fn=sync_sliders, 
-            inputs=speaker_latent2_slider, 
-            outputs=speaker_latent1_slider
+            fn=update_sliders, 
+            inputs=[speaker_latent1_slider, speaker_latent2_slider, gr.State("speaker_latent2")], 
+            outputs=[speaker_latent1_slider, speaker_latent2_slider]
         )
         
         # Modell-Laden und Dropdowns aktualisieren
