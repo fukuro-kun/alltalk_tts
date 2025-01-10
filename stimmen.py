@@ -7,28 +7,11 @@ Dieses Modul bietet Funktionen für:
 - Latent-Merge-Prozesse
 - Audio-Generierung
 
-Hauptfunktionen:
-1. Verzeichnis-Funktionen:
-   - get_latent_directory(): Ermittelt Latent-Verzeichnis
-   - get_model_directory(): Bestimmt Modell-Verzeichnis
-   - get_model_files(): Findet Modell-Dateien
-   - find_best_models(): Sucht nach besten Modell-Dateien
-   - find_jsons(): Findet spezifische JSON-Dateien
-
-2. Latent-Management:
-   - load_available_latents(): Lädt verfügbare Latent-JSONs
-   - check_latent_compatibility(): Prüft Latent-Kompatibilität
-   - merge_latents(): Merged Latents mit Gewichtung
-   - generate_merge_filename(): Generiert Dateinamen für Merge
-
-3. Audio-Generierung:
-   - generate_latent_audio(): Generiert Audio aus Latent
-   - setup_stimmen_tab(): Erstellt Benutzeroberfläche für Stimmen-Management
-
 Hauptanwendungsbereich: Text-to-Speech Latent-Verarbeitung
 
-Funktionen in Reihenfolge:
+Hauptfunktionen Funktionen in Reihenfolge:
 
+## Basis-Utility-Funktionen
 1. get_latent_directory():
    - Ermittelt das Basis-Verzeichnis für Latents
    - Unterstützt flexible Fallback-Optionen
@@ -45,6 +28,7 @@ Funktionen in Reihenfolge:
    - Prüft Existenz von Konfigurationen, Checkpoints, Vokabular
    - Flexible Pfadermittlung
 
+## Such- und Filterfunktionen
 4. find_best_models():
    - Sucht nach 'best_model.pth' Dateien
    - Optional: Filterung nach Sprecher-Namen
@@ -53,6 +37,7 @@ Funktionen in Reihenfolge:
    - Findet spezifische JSON-Dateien
    - Optionale Filterung nach Sprecher-Namen
 
+## Latent-Management-Kernfunktionen
 6. load_available_latents():
    - Lädt verfügbare Latent-JSONs aus verschiedenen Verzeichnissen
     
@@ -73,20 +58,23 @@ Funktionen in Reihenfolge:
    - Generiert eindeutigen Dateinamen für gemergten Latent
    - Basiert auf Quell-Latent-Namen
 
-10. setup_stimmen_tab():
-    - Erstellt komplexe Gradio-Benutzeroberfläche
-    - Integriert Latent-Management-Funktionen
-    - Implementiert Slider-Synchronisation
-    - Handhabt Modell-Laden und Audio-Generierung
-
-11. generate_latent_audio():
+## Audio-Generierung
+10. generate_latent_audio():
     - Generiert Audio aus Latent
     - Unterstützt benutzerdefinierte Texte
     - Fehlerbehandlung und Debugging
     - Temporäre Datei-Generierung
+
+## UI-Komponenten
+11. setup_stimmen_tab():
+    - Erstellt komplexe Gradio-Benutzeroberfläche
+    - Integriert Latent-Management-Funktionen
+    - Implementiert Slider-Synchronisation
+    - Handhabt Modell-Laden und Audio-Generierung
 """
 
 import os
+import sys
 import json
 import numpy as np
 import gradio as gr
@@ -94,6 +82,11 @@ import glob
 import logging
 import time
 from functools import wraps
+import tempfile
+import traceback
+import torch
+from TTS.tts.models.xtts import Xtts
+from TTS.tts.configs.xtts_config import XttsConfig
 
 def get_latent_directory(base_dir: str | None = None) -> str:
     """
@@ -441,7 +434,9 @@ def generate_merge_filename(sources: dict[str, list[dict]]) -> str:
 def generate_latent_audio(
     latent_name: str, 
     text: str | None = None, 
-    output_dir: str | None = None
+    output_dir: str | None = None,
+    model_name: str = "xtts",
+    version: str = "2.0.3"
 ) -> str | None:
     """
     Generiert Audio aus einem beliebigen Latent.
@@ -452,6 +447,8 @@ def generate_latent_audio(
             Verwendet Standardtext, wenn None. Defaults to None.
         output_dir (str, optional): Verzeichnis für generierte Audios. 
             Erstellt temporäres Verzeichnis, wenn None. Defaults to None.
+        model_name (str, optional): Name des TTS-Modells. Defaults to "xtts".
+        version (str, optional): Version des Modells. Defaults to "2.0.3".
 
     Returns:
         str | None: Pfad zur generierten Audiodatei oder None bei Fehler.
@@ -460,10 +457,12 @@ def generate_latent_audio(
         ImportError: Wenn TTS-Engine nicht geladen werden kann.
         RuntimeError: Bei Problemen während der Audio-Generierung.
     """
+    # Verwende print() für direkte Ausgabe in pytest
+    print(f"🔍 Starte Audio-Generierung für Latent: {latent_name}")
+    
     try:
         # Importiere die TTS-Engine
         from system.tts_engines.xtts.model_engine import tts_class
-        import tempfile
         
         # Standardtext für deutsche Generierung
         if text is None:
@@ -473,39 +472,104 @@ def generate_latent_audio(
         if output_dir is None:
             output_dir = tempfile.mkdtemp(prefix='alltalk_preview_')
         
+        # Überprüfe Latent-Datei
+        latent_dir = get_latent_directory()
+        latent_path = os.path.join(latent_dir, f"{latent_name}.json")
+        
+        print(f"🔍 Latent-Verzeichnis: {latent_dir}")
+        print(f"🔍 Latent-Pfad: {latent_path}")
+        print(f"🔍 Existiert Latent-Datei: {os.path.exists(latent_path)}")
+        
+        if not os.path.exists(latent_path):
+            print(f"❌ Latent-Datei nicht gefunden: {latent_path}")
+            return None
+        
+        # Validiere Latent-JSON
+        try:
+            with open(latent_path, 'r', encoding='utf-8') as f:
+                latent_data = json.load(f)
+                
+            # Zusätzliche Validierungen
+            if not isinstance(latent_data, dict):
+                print(f"❌ Ungültiges Latent-Format: {latent_path}")
+                return None
+        except json.JSONDecodeError as je:
+            print(f"❌ JSON-Dekodierungsfehler in {latent_path}: {je}")
+            return None
+        except Exception as e:
+            print(f"❌ Fehler beim Laden des Latents: {e}")
+            return None
+        
         # Generiere Ausgabedateinamen im temporären Verzeichnis
         output_path = os.path.join(output_dir, f"{latent_name}_preview.wav")
         
+        # Zusätzliche Debugging-Informationen
+        print(f"📂 Ausgabepfad: {output_path}")
+        print(f"📄 Latent-Pfad: {latent_path}")
+        print(f"🔤 Text: {text}")
+        
         # Initialisiere TTS-Engine
+        print("🚀 Initialisiere TTS-Engine")
         tts_engine = tts_class()
+        print("✅ TTS-Engine initialisiert")
+        
+        # Versuche, das Modell zu laden, wenn es nicht geladen ist
+        if not tts_engine.is_tts_model_loaded:
+            print("🔄 Lade Modell vor Audio-Generierung")
+            try:
+                # Verwende asyncio.run für asynchrone Methode
+                import asyncio
+                asyncio.run(tts_engine.handle_tts_method_change(f"{model_name} - xttsv2_{version}"))
+                print("✅ Modell erfolgreich geladen")
+            except Exception as load_error:
+                print(f"❌ Fehler beim Laden des Modells: {load_error}")
+                return None
+        
+        # Überprüfe, ob ein Modell geladen ist
+        print(f"🔍 Aktuell geladenes Modell: {tts_engine.current_model_loaded}")
+        print(f"🔍 Modell geladen: {tts_engine.is_tts_model_loaded}")
         
         # Audio generieren - WICHTIG: Prefix 'latent:' beibehalten!
-        result = tts_engine.generate_tts(
-            text=text,
-            voice=f"latent:{latent_name}.json",  # Wichtig: Prefix 'latent:' bleibt!
-            language="de",
-            temperature=0.7,
-            repetition_penalty=5.0,
-            speed=1.0,
-            pitch=0.0,
-            output_file=output_path,
-            streaming=False
-        )
+        try:
+            print("🎤 Starte Audio-Generierung")
+            result = tts_engine.generate_tts(
+                text=text,
+                voice=f"latent:{latent_name}.json",  # Wichtig: Prefix 'latent:' bleibt!
+                language="de",
+                temperature=0.7,
+                repetition_penalty=5.0,
+                speed=1.0,
+                pitch=0.0,
+                output_file=output_path,
+                streaming=False
+            )
+            
+            print(f"🎵 TTS-Generierung Ergebnis: {result}")
+        except Exception as tts_error:
+            print(f"❌ Fehler bei TTS-Generierung: {tts_error}")
+            print(traceback.format_exc())
+            return None
         
         # Überprüfe, ob Audio generiert wurde
+        print(f"📊 Überprüfe Ausgabedatei: {output_path}")
+        print(f"📊 Datei existiert: {os.path.exists(output_path)}")
+        print(f"📊 Dateigröße: {os.path.getsize(output_path) if os.path.exists(output_path) else 'N/A'}")
+        
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             print(f"❌ Keine Audio-Datei generiert: {output_path}")
+            print(traceback.format_exc())
             return None
         
         print(f"✅ Audio-Vorschau erfolgreich generiert: {output_path}")
         return output_path
     
+    except ImportError as ie:
+        print(f"❌ Import-Fehler: TTS-Engine konnte nicht geladen werden: {ie}")
+        print(traceback.format_exc())
+        return None
     except Exception as e:
-        # Umfangreiches Debugging
-        import traceback
-        print(f"❌ Fehler bei Audio-Generierung aus Latent: {e}")
-        print("🔍 Traceback:")
-        traceback.print_exc()
+        print(f"❌ Unerwarteter Fehler bei Audio-Generierung aus Latent: {e}")
+        print(traceback.format_exc())
         return None
 
 def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
@@ -669,15 +733,6 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
         def load_model_for_merge():
             """Lädt das TTS-Modell für Latent Merge"""
             try:
-                import torch
-                from TTS.tts.models.xtts import Xtts
-                from TTS.tts.configs.xtts_config import XttsConfig
-                
-                # Debugging: Überprüfe CUDA-Verfügbarkeit
-                print(f"🔍 CUDA verfügbar: {torch.cuda.is_available()}")
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                print(f"🖥️ Verwendetes Gerät: {device}")
-                
                 # Modellpfad dynamisch ermitteln
                 model_path = get_model_directory()
                 
@@ -795,68 +850,6 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
         )
 
         # Generierungs-Handler für Latents
-        def generate_latent_audio(latent_name, text=None, output_dir=None):
-            """
-            Generiere Audio aus einem beliebigen Latent
-            
-            Args:
-                latent_name (str): Name des Latents (ohne .json)
-                text (str, optional): Text zur Audio-Generierung. 
-                                       Verwendet Standardtext, wenn None
-                output_dir (str, optional): Verzeichnis für generierte Audios
-            
-            Returns:
-                str: Pfad zur generierten Audiodatei oder None bei Fehler
-            """
-            try:
-                # Importiere die TTS-Engine
-                from system.tts_engines.xtts.model_engine import tts_class
-                import tempfile
-                
-                # Standardtext für deutsche Generierung
-                if text is None:
-                    text = "Der alte Meister saß in seinem Studierzimmer und betrachtete die alten Schriftrollen."
-                
-                # Temporäres Verzeichnis für Vorschau-Audios
-                if output_dir is None:
-                    output_dir = tempfile.mkdtemp(prefix='alltalk_preview_')
-                
-                # Generiere Ausgabedateinamen im temporären Verzeichnis
-                output_path = os.path.join(output_dir, f"{latent_name}_preview.wav")
-                
-                # Initialisiere TTS-Engine
-                tts_engine = tts_class()
-                
-                # Audio generieren - WICHTIG: Prefix 'latent:' beibehalten!
-                result = tts_engine.generate_tts(
-                    text=text,
-                    voice=f"latent:{latent_name}.json",  # Wichtig: Prefix 'latent:' bleibt!
-                    language="de",
-                    temperature=0.7,
-                    repetition_penalty=5.0,
-                    speed=1.0,
-                    pitch=0.0,
-                    output_file=output_path,
-                    streaming=False
-                )
-                
-                # Überprüfe, ob Audio generiert wurde
-                if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-                    print(f"❌ Keine Audio-Datei generiert: {output_path}")
-                    return None
-                
-                print(f"✅ Audio-Vorschau erfolgreich generiert: {output_path}")
-                return output_path
-            
-            except Exception as e:
-                # Umfangreiches Debugging
-                import traceback
-                print(f"❌ Fehler bei Audio-Generierung aus Latent: {e}")
-                print("🔍 Traceback:")
-                traceback.print_exc()
-                return None
-        
-        # Generierungs-Event-Handler für Latents
         gpt_latent1_generate_btn.click(
             fn=generate_latent_audio,
             inputs=[gpt_latent1_dropdown, text_input],
@@ -883,61 +876,53 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                           speaker1, speaker1_weight, speaker2, speaker2_weight,
                           merge_name):
             """
-            Merge verschiedene Latents für die Benutzeroberfläche
+            Merge verschiedene Latents für die Benutzeroberfläche (Wrapper für die allgemeinere merge_latents-Funktion)
             
             Args:
-                gpt1, gpt2: Namen der GPT-Latents
-                gpt1_weight, gpt2_weight: Gewichtungen für GPT-Latents
-                speaker1, speaker2: Namen der Speaker-Latents
-                speaker1_weight, speaker2_weight: Gewichtungen für Speaker-Latents
-                merge_name: Name für den gemergten Latent
+                gpt1 (str): Erster GPT-Latent
+                gpt1_weight (float): Gewichtung für ersten GPT-Latent
+                gpt2 (str): Zweiter GPT-Latent
+                gpt2_weight (float): Gewichtung für zweiten GPT-Latent
+                speaker1 (str): Erster Speaker-Latent
+                speaker1_weight (float): Gewichtung für ersten Speaker-Latent
+                speaker2 (str): Zweiter Speaker-Latent
+                speaker2_weight (float): Gewichtung für zweiten Speaker-Latent
+                merge_name (str): Name für den gemergten Latent
             
             Returns:
                 str: Dateiname des gemergten Latents
             """
             try:
-                # Hole Latent-Verzeichnis
+                # Lade Latent-Dateien
                 latent_dir = get_latent_directory()
                 
-                # Lade verfügbare Latents zur Überprüfung
-                available_latents = load_available_latents()
-                print(f"📋 Verfügbare Latents: {available_latents}")
+                # Vorbereitung der Latent-Quellen
+                latent_sources = {
+                    'gpt_cond_latent': [
+                        {'json': os.path.join(latent_dir, f"{gpt1}.json"), 'weight': gpt1_weight},
+                        {'json': os.path.join(latent_dir, f"{gpt2}.json"), 'weight': gpt2_weight}
+                    ],
+                    'speaker_embedding': [
+                        {'json': os.path.join(latent_dir, f"{speaker1}.json"), 'weight': speaker1_weight},
+                        {'json': os.path.join(latent_dir, f"{speaker2}.json"), 'weight': speaker2_weight}
+                    ]
+                }
                 
-                # Lade JSONs
-                gpt_sources = [
-                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt1}.json"))), 'weight': gpt1_weight/100, 'name': gpt1},
-                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt2}.json"))), 'weight': gpt2_weight/100, 'name': gpt2}
-                ]
-                speaker_sources = [
-                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker1}.json"))), 'weight': speaker1_weight/100, 'name': speaker1},
-                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker2}.json"))), 'weight': speaker2_weight/100, 'name': speaker2}
-                ]
-                
-                # Prüfe Kompatibilität
-                check_latent_compatibility([s['json'] for s in gpt_sources + speaker_sources])
-                
-                # Merge Latents
-                merged_latents = merge_latents({
-                    'gpt_cond_latent': gpt_sources,
-                    'speaker_embedding': speaker_sources
-                })
+                # Merge-Vorgang
+                merged_latent = merge_latents(latent_sources)
                 
                 # Generiere Dateinamen
-                merge_filename = generate_merge_filename({
-                    'gpt_cond_latent': gpt_sources,
-                    'speaker_embedding': speaker_sources
-                })
+                merged_filename = generate_merge_filename(latent_sources)
                 
                 # Speichere gemergten Latent
-                merged_path = os.path.join(latent_dir, merge_filename)
-                with open(merged_path, 'w') as f:
-                    json.dump(merged_latents, f, indent=2)
+                merged_path = os.path.join(latent_dir, merged_filename)
+                with open(merged_path, 'w', encoding='utf-8') as f:
+                    json.dump(merged_latent, f, indent=2)
                 
-                return merge_filename
+                return merged_filename
+            
             except Exception as e:
-                import traceback
                 print(f"❌ Fehler beim Mergen der Latents: {e}")
-                traceback.print_exc()
                 return None
         
         merge_btn.click(
