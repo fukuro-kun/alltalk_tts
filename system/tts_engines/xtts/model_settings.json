@@ -32,7 +32,7 @@
         "temperature_set": 0.75
     },
     "openai_voices": {
-        "alloy": "female_01.wav",
+        "alloy": "Tom5.wav",
         "echo": "female_01.wav",
         "fable": "female_01.wav",
         "nova": "female_01.wav",

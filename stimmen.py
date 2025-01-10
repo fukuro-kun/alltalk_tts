@@ -335,30 +335,62 @@ def merge_latents(latent_sources: dict[str, list[dict]]) -> dict:
 
     Returns:
         dict: Zusammengeführtes Latent-JSON mit gemittelten Werten.
+        Struktur bleibt identisch zum Eingabe-JSON.
 
     Raises:
         ValueError: Bei ungültigen Latent-Strukturen oder Gewichtungen.
     """
-    merged_latents = {}
-    
+    # Prüfe Eingabedaten
+    if not latent_sources or not all(key in latent_sources for key in ['gpt_cond_latent', 'speaker_embedding']):
+        raise ValueError("Ungültige Latent-Quellen")
+
+    # Initialisiere Ergebnis-Dictionary
+    merged_latent = {}
+
+    # Merge für jeden Latent-Typ
     for latent_type in ['gpt_cond_latent', 'speaker_embedding']:
         sources = latent_sources[latent_type]
         
-        # Normalisiere Weights
+        # Normalisiere Gewichtungen
         total_weight = sum(source['weight'] for source in sources)
-        sources = [{'json': s['json'], 'weight': s['weight']/total_weight} for s in sources]
-        
-        # Initialisiere Merge-Array
-        merged_array = np.zeros_like(np.array(sources[0]['json'][latent_type][0][0]))
-        
-        # Gewichtete Addition
-        for source in sources:
-            source_array = np.array(source['json'][latent_type][0][0])
-            merged_array += source_array * source['weight']
-        
-        merged_latents[latent_type] = [[[merged_array.tolist()]]]
-    
-    return merged_latents
+        normalized_sources = [
+            {'json': source['json'], 'normalized_weight': source['weight'] / total_weight} 
+            for source in sources
+        ]
+
+        # Extrahiere Latent-Daten
+        latent_data = [source['json'][latent_type][0] for source in normalized_sources]
+
+        # Merge-Logik mit Beibehaltung der Originalstruktur
+        if latent_type == 'gpt_cond_latent':
+            # Struktur: [1][32][1024]
+            merged_data = [[
+                [
+                    np.average(
+                        [source[j][i] for source in latent_data], 
+                        weights=[src['normalized_weight'] for src in normalized_sources],
+                        axis=0
+                    ) 
+                    for i in range(len(latent_data[0][0]))
+                ] 
+                for j in range(len(latent_data[0]))
+            ]]
+        else:  # speaker_embedding
+            # Struktur: [1][512][1]
+            merged_data = [[
+                [
+                    [np.average(
+                        [source[j][0] for source in latent_data], 
+                        weights=[src['normalized_weight'] for src in normalized_sources],
+                        axis=0
+                    )]
+                ] 
+                for j in range(len(latent_data[0]))
+            ]]
+
+        merged_latent[latent_type] = merged_data
+
+    return merged_latent
 
 def generate_merge_filename(sources: dict[str, list[dict]]) -> str:
     """
@@ -374,11 +406,37 @@ def generate_merge_filename(sources: dict[str, list[dict]]) -> str:
     Raises:
         ValueError: Wenn keine Quellen vorhanden sind.
     """
-    gpt_sources = [os.path.splitext(s['json'])[0] for s in sources['gpt_cond_latent']]
-    speaker_sources = [os.path.splitext(s['json'])[0] for s in sources['speaker_embedding']]
+    if not sources:
+        raise ValueError("Keine Latent-Quellen zum Mergen gefunden")
     
-    all_sources = sorted(set(gpt_sources + speaker_sources))
-    return f"merge_{'_'.join(all_sources)}.json"
+    def extract_name(source: dict) -> str:
+        """
+        Extrahiert den Namen aus einer Latent-Quelle.
+        
+        Args:
+            source (dict): Dictionary mit 'json' Schlüssel
+        
+        Returns:
+            str: Name des Latents
+        """
+        # Wenn 'json' bereits ein Dictionary ist (gemergter Latent), extrahiere Namen
+        if isinstance(source['json'], dict):
+            return source.get('name', 'unknown')
+        
+        # Wenn 'json' ein Pfad oder Dateiname ist
+        json_path = source['json']
+        # Versuche, den Namen aus dem Dateinamen zu extrahieren
+        name = os.path.splitext(os.path.basename(json_path))[0]
+        return name if name else 'unknown'
+    
+    gpt_sources = [extract_name(s) for s in sources.get('gpt_cond_latent', [])]
+    speaker_sources = [extract_name(s) for s in sources.get('speaker_embedding', [])]
+    
+    # Generiere Dateinamen
+    merge_sources = gpt_sources + speaker_sources
+    merge_filename = f"merge_{'_'.join(merge_sources)}.json"
+    
+    return merge_filename
 
 def generate_latent_audio(
     latent_name: str, 
@@ -847,12 +905,12 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 
                 # Lade JSONs
                 gpt_sources = [
-                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt1}.json"))), 'weight': gpt1_weight/100},
-                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt2}.json"))), 'weight': gpt2_weight/100}
+                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt1}.json"))), 'weight': gpt1_weight/100, 'name': gpt1},
+                    {'json': json.load(open(os.path.join(latent_dir, f"{gpt2}.json"))), 'weight': gpt2_weight/100, 'name': gpt2}
                 ]
                 speaker_sources = [
-                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker1}.json"))), 'weight': speaker1_weight/100},
-                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker2}.json"))), 'weight': speaker2_weight/100}
+                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker1}.json"))), 'weight': speaker1_weight/100, 'name': speaker1},
+                    {'json': json.load(open(os.path.join(latent_dir, f"{speaker2}.json"))), 'weight': speaker2_weight/100, 'name': speaker2}
                 ]
                 
                 # Prüfe Kompatibilität
