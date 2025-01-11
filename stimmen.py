@@ -500,6 +500,19 @@ def generate_latent_audio(
     
     return output_path
 
+def prepare_latent_name(latent_name: str) -> str:
+    """
+    Bereitet den Latent-Namen für die Audio-Generierung vor.
+    Entfernt .json-Erweiterung, falls vorhanden.
+    
+    Args:
+        latent_name (str): Ursprünglicher Latent-Name
+    
+    Returns:
+        str: Bereinigter Latent-Name
+    """
+    return os.path.splitext(latent_name)[0]
+
 def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
     """
     Erstellt den Stimmen Management Tab mit Latent Merge Funktionalität.
@@ -821,7 +834,7 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
         )
         
         merge_generate_btn.click(
-            fn=generate_latent_audio,
+            fn=lambda name, text: generate_latent_audio(prepare_latent_name(name), text),
             inputs=[merge_name_input, text_input],
             outputs=[merged_audio]
         )
