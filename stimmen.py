@@ -782,12 +782,12 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
                 # Vorbereitung der Latent-Quellen
                 latent_sources = {
                     'gpt_cond_latent': [
-                        {'json': os.path.join(latent_dir, f"{gpt1}.json"), 'weight': gpt1_weight},
-                        {'json': os.path.join(latent_dir, f"{gpt2}.json"), 'weight': gpt2_weight}
+                        {'json': json.load(open(os.path.join(latent_dir, f"{gpt1}.json"))), 'weight': gpt1_weight/100, 'name': gpt1},
+                        {'json': json.load(open(os.path.join(latent_dir, f"{gpt2}.json"))), 'weight': gpt2_weight/100, 'name': gpt2}
                     ],
                     'speaker_embedding': [
-                        {'json': os.path.join(latent_dir, f"{speaker1}.json"), 'weight': speaker1_weight},
-                        {'json': os.path.join(latent_dir, f"{speaker2}.json"), 'weight': speaker2_weight}
+                        {'json': json.load(open(os.path.join(latent_dir, f"{speaker1}.json"))), 'weight': speaker1_weight/100, 'name': speaker1},
+                        {'json': json.load(open(os.path.join(latent_dir, f"{speaker2}.json"))), 'weight': speaker2_weight/100, 'name': speaker2}
                     ]
                 }
                 
