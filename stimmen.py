@@ -382,13 +382,11 @@ def merge_latents(latent_sources: dict[str, list[dict]]) -> dict:
         else:  # speaker_embedding
             # Struktur: [1][512][1]
             merged_data = [[
-                [
-                    [np.average(
-                        [source[j][0] for source in latent_data], 
-                        weights=[src['normalized_weight'] for src in normalized_sources],
-                        axis=0
-                    )]
-                ] 
+                [np.average(
+                    [source[j][0] for source in latent_data], 
+                    weights=[src['normalized_weight'] for src in normalized_sources],
+                    axis=0
+                ).tolist()]  # Konvertiere NumPy-Array zu Liste
                 for j in range(len(latent_data[0]))
             ]]
 
