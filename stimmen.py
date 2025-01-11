@@ -81,6 +81,15 @@ Hauptfunktionen Funktionen in Reihenfolge:
     - Verwendet den GPU-Bereich, wenn verfügbar
     - Gibt das initialisierte Modell zurück
 
+## Latent-Ähnlichkeitsberechnung
+13. calculate_latent_similarity():
+    - Berechnet die Ähnlichkeit zwischen zwei Latent-Tensoren
+    - Verwendet Kosinus-Ähnlichkeit
+
+14. setup_similarity_buttons():
+    - Richtet Buttons und Ausgabefelder für Latent-Ähnlichkeitsberechnung ein
+    - Integriert Funktionen für GPT und Speaker Latent-Ähnlichkeitsberechnung
+
 """
 
 import os
@@ -836,6 +845,25 @@ def setup_stimmen_tab(demo: gr.Blocks) -> gr.Blocks:
             inputs=[merge_name_input, text_input],
             outputs=[merged_audio]
         )
+        
+        # Latent-Ähnlichkeitsberechnung
+        gpt_similarity_btn, gpt_similarity_output, speaker_similarity_btn, speaker_similarity_output = setup_similarity_buttons(
+            demo, 
+            gpt_latent1_dropdown, 
+            gpt_latent2_dropdown,
+            speaker_latent1_dropdown, 
+            speaker_latent2_dropdown
+        )
+        
+        # Füge Ähnlichkeitsberechnung hinzu
+        gr.Markdown("### Latent Ähnlichkeitsberechnung")
+        with gr.Group():
+            with gr.Row():
+                gpt_similarity_btn
+                gpt_similarity_output
+            with gr.Row():
+                speaker_similarity_btn
+                speaker_similarity_output
     
     # Hintergrund-Initialisierung starten
     demo.load(
@@ -870,3 +898,162 @@ def initialize_xtts_model():
         model.cuda()
     
     return model
+
+import torch
+import numpy as np
+
+def calculate_latent_similarity(latent1: dict, latent2: dict) -> dict:
+    """
+    Berechnet die Ähnlichkeit zwischen zwei Latent-Dictionaries.
+    
+    Args:
+        latent1 (dict): Erster Latent als Dictionary
+        latent2 (dict): Zweiter Latent als Dictionary
+    
+    Returns:
+        dict: Ähnlichkeitswerte für verschiedene Latent-Komponenten
+    """
+    def calculate_component_similarity(component1: list, component2: list) -> float:
+        """
+        Berechnet Ähnlichkeit für eine Latent-Komponente.
+        
+        Args:
+            component1 (list): Erste Latent-Komponente
+            component2 (list): Zweite Latent-Komponente
+        
+        Returns:
+            float: Ähnlichkeitswert als Prozentsatz
+        """
+        # Konvertiere zu Tensoren
+        latent1_tensor = torch.tensor(component1)
+        latent2_tensor = torch.tensor(component2)
+        
+        # Flache Tensoren, falls mehrdimensional
+        latent1_flat = latent1_tensor.view(-1)
+        latent2_flat = latent2_tensor.view(-1)
+        
+        # Stelle sicher, dass beide Tensoren gleiche Länge haben
+        min_length = min(len(latent1_flat), len(latent2_flat))
+        latent1_flat = latent1_flat[:min_length]
+        latent2_flat = latent2_flat[:min_length]
+        
+        # Normalisiere die Latents
+        latent1_norm = torch.nn.functional.normalize(latent1_flat, p=2, dim=0)
+        latent2_norm = torch.nn.functional.normalize(latent2_flat, p=2, dim=0)
+        
+        # Kosinus-Ähnlichkeit
+        cosine_similarity = torch.nn.functional.cosine_similarity(
+            latent1_norm.unsqueeze(0), 
+            latent2_norm.unsqueeze(0), 
+            dim=1
+        )
+        
+        # Konvertiere zu Prozentsatz
+        similarity_percentage = cosine_similarity.item() * 100
+        
+        return similarity_percentage
+    
+    # Berechne Ähnlichkeiten für verschiedene Komponenten
+    gpt_similarity = calculate_component_similarity(
+        latent1['gpt_cond_latent'], 
+        latent2['gpt_cond_latent']
+    )
+    
+    speaker_similarity = calculate_component_similarity(
+        latent1['speaker_embedding'], 
+        latent2['speaker_embedding']
+    )
+    
+    # Gesamtähnlichkeit als gewichteter Durchschnitt
+    # GPT Latent hat mehr Elemente, daher mehr Gewicht
+    total_similarity = (
+        (gpt_similarity * 0.7) + 
+        (speaker_similarity * 0.3)
+    )
+    
+    return {
+        'total_similarity': total_similarity,
+        'gpt_similarity': gpt_similarity,
+        'speaker_similarity': speaker_similarity
+    }
+
+def load_latent_from_json(latent_name: str) -> dict:
+    """
+    Lädt einen Latent aus einer JSON-Datei.
+    
+    Args:
+        latent_name (str): Name des Latent-JSONs
+    
+    Returns:
+        dict: Geladener Latent als Dictionary
+    """
+    latent_path = os.path.join(get_latent_directory(), f"{latent_name}.json")
+    with open(latent_path, 'r') as f:
+        return json.load(f)
+
+def setup_similarity_buttons(
+    demo: gr.Blocks, 
+    gpt_latent1_dropdown: gr.Dropdown, 
+    gpt_latent2_dropdown: gr.Dropdown,
+    speaker_latent1_dropdown: gr.Dropdown, 
+    speaker_latent2_dropdown: gr.Dropdown
+) -> tuple:
+    """
+    Richtet Buttons und Ausgabefelder für Latent-Ähnlichkeitsberechnung ein.
+    
+    Args:
+        demo (gr.Blocks): Gradio Blocks-Instanz
+        gpt_latent1_dropdown (gr.Dropdown): Dropdown für ersten GPT Latent
+        gpt_latent2_dropdown (gr.Dropdown): Dropdown für zweiten GPT Latent
+        speaker_latent1_dropdown (gr.Dropdown): Dropdown für ersten Speaker Latent
+        speaker_latent2_dropdown (gr.Dropdown): Dropdown für zweiten Speaker Latent
+    
+    Returns:
+        tuple: Buttons und Ausgabefelder für Ähnlichkeitsberechnung
+    """
+    def calculate_gpt_latent_similarity(gpt_latent1, gpt_latent2):
+        """Berechnet Ähnlichkeit zwischen zwei GPT Latents"""
+        try:
+            latent1 = load_latent_from_json(gpt_latent1)
+            latent2 = load_latent_from_json(gpt_latent2)
+            similarity = calculate_latent_similarity(latent1, latent2)
+            return f"Gesamtähnlichkeit: {similarity['total_similarity']:.6f} %\nGPT Ähnlichkeit: {similarity['gpt_similarity']:.6f} %\nSpeaker Ähnlichkeit: {similarity['speaker_similarity']:.6f} %"
+        except Exception as e:
+            return f"Fehler: {str(e)}"
+
+    def calculate_speaker_latent_similarity(speaker_latent1, speaker_latent2):
+        """Berechnet Ähnlichkeit zwischen zwei Speaker Latents"""
+        try:
+            latent1 = load_latent_from_json(speaker_latent1)
+            latent2 = load_latent_from_json(speaker_latent2)
+            similarity = calculate_latent_similarity(latent1, latent2)
+            return f"Gesamtähnlichkeit: {similarity['total_similarity']:.6f} %\nGPT Ähnlichkeit: {similarity['gpt_similarity']:.6f} %\nSpeaker Ähnlichkeit: {similarity['speaker_similarity']:.6f} %"
+        except Exception as e:
+            return f"Fehler: {str(e)}"
+
+    # GPT Latent Ähnlichkeitsberechnung
+    gpt_similarity_btn = gr.Button("🔍 GPT Latents vergleichen")
+    gpt_similarity_output = gr.Textbox(label="GPT Latent Ähnlichkeit")
+    
+    gpt_similarity_btn.click(
+        fn=calculate_gpt_latent_similarity,
+        inputs=[gpt_latent1_dropdown, gpt_latent2_dropdown],
+        outputs=gpt_similarity_output
+    )
+
+    # Speaker Latent Ähnlichkeitsberechnung
+    speaker_similarity_btn = gr.Button("🔍 Speaker Latents vergleichen")
+    speaker_similarity_output = gr.Textbox(label="Speaker Latent Ähnlichkeit")
+    
+    speaker_similarity_btn.click(
+        fn=calculate_speaker_latent_similarity,
+        inputs=[speaker_latent1_dropdown, speaker_latent2_dropdown],
+        outputs=speaker_similarity_output
+    )
+
+    return (
+        gpt_similarity_btn, 
+        gpt_similarity_output, 
+        speaker_similarity_btn, 
+        speaker_similarity_output
+    )
